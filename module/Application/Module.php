@@ -21,8 +21,12 @@ class Module
         // fields to the ViewModel, so detect a 404 first and respond to it
         $eventManager->getSharedManager()->attach('Zend\Stdlib\DispatchableInterface', MvcEvent::EVENT_DISPATCH, array($this, 'detect404'), -89);
 
+        // Ensure we always render JSON
+        $eventManager->attach(MvcEvent::EVENT_RENDER, array($this, 'ensureJsonModel'), 999);
+
         // Turn errors into JSON
-        $eventManager->attach(MvcEvent::EVENT_DISPATCH_ERROR, array($this, 'onDispatchError'), -10);
+        // $eventManager->attach(MvcEvent::EVENT_RENDER, array($this, 'renderError'));
+
     }
 
     public function detect404(MvcEvent $e)
@@ -40,8 +44,42 @@ class Module
         }
     }
 
-    public function onDispatchError(MvcEvent $e)
+    /**
+     * Ensure that any ViewModels are JsonModels
+     *
+     * @param  MvcEvent $e
+     * @return void
+     */
+    public function ensureJsonModel(MvcEvent $e)
     {
+        // We ought to check for a JSON accept header here, except that we
+        // don't need to as we only ever send back JSON.
+        
+
+        $currentModel = $e->getResult();
+        if ($currentModel instanceof JsonModel) {
+            // Current model is already a JsonModel
+            return;
+        }
+
+        if ($currentModel instanceof ModelInterface) {
+            $model = new JsonModel();
+            $model->setTerminal(true);
+            $model->setVariables($currentModel->getVariables());
+            $e->setResult($model);
+            $e->setViewModel($model);
+        }
+
+
+    }
+
+    public function renderError(MvcEvent $e)
+    {
+        // must be an error
+        if (!$e->isError()) {
+            return;
+        }
+
         $request = $e->getRequest();
         if (!$request instanceof HttpRequest) {
             return;
@@ -57,22 +95,13 @@ class Module
         }
 
         // Create a new JsonModel and populate with default error information
-        $model = new JsonModel(array(
-            'error'   =>  'yes',
-            'message' => 'An error occurred during execution.',
-        ));
+        $model = new JsonModel();
 
         // Override with information from actual ViewModel
         $displayExceptions = true;
         if ($currentModel instanceof ModelInterface) {
-            if ($currentModel->message) {
-                $model->message = $currentModel->message;
-            }
-            if ($currentModel->reason) {
-                $model->reason = $currentModel->reason;
-            }
-            $data = $currentModel->getVariables();
-            if (array_key_exists('display_exceptions', $data)) {
+            $model->setVariables($currentModel->getVariables());
+            if ($model->display_exceptions) {
                 $displayExceptions = (bool)$data['display_exceptions'];
             }
         }
